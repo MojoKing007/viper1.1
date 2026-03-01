@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>F1 Racing Game</title>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* Score */
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 22px;
+            font-weight: bold;
+            color: white;
+            display: none;
+            z-index: 20;
+        }
+
+        /* Game Over Text */
+        #gameOver {
+            position: absolute;
+            top: 45%;
+            width: 100%;
+            text-align: center;
+            font-size: 40px;
+            color: red;
+            display: none;
+            z-index: 20;
+        }
+
+        /* Restart */
+        #restartBtn {
+            position: absolute;
+            top: 60%;
+            width: 100%;
+            text-align: center;
+            display: none;
+            z-index: 20;
+        }
+
+        #restartBtn button {
+            padding: 12px 30px;
+            font-size: 18px;
+            border: none;
+            border-radius: 8px;
+            background: orange;
+            cursor: pointer;
+        }
+
+        /* Start Screen */
+        #startScreen {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            z-index: 30;
+        }
+
+        #startBg {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Pulsing Start Button */
+        #startBtn {
+            position: absolute;
+            bottom: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 230px;
+            cursor: pointer;
+            animation: pulseGlow 1.5s infinite ease-in-out;
+            transition: transform 0.15s ease;
+        }
+
+        #startBtn:active {
+            transform: translateX(-50%) scale(0.92);
+        }
+
+        @keyframes pulseGlow {
+            0% {
+                transform: translateX(-50%) scale(1);
+                filter: drop-shadow(0 0 5px red);
+            }
+
+            50% {
+                transform: translateX(-50%) scale(1.1);
+                filter: drop-shadow(0 0 25px red);
+            }
+
+            100% {
+                transform: translateX(-50%) scale(1);
+                filter: drop-shadow(0 0 5px red);
+            }
+        }
+
+        /* Game Over Video */
+        #gameOverVideo {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="ui">Score: 0</div>
+    <div id="gameOver">💥 GAME OVER 💥</div>
+
+    <div id="restartBtn">
+        <button onclick="restartGame()">Restart</button>
+    </div>
+
+    <div id="startScreen">
+        <img src="start.png" id="startBg">
+        <img src="startbutton.png" id="startBtn">
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- 🎬 Game Over Video -->
+    <video id="gameOverVideo" preload="auto">
+        <source src="gameover.mp4" type="video/mp4">
+    </video>
+
+    <!-- 🎵 In-Game Music -->
+    <audio id="bgMusic"></audio>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const ui = document.getElementById("ui");
+        const gameOverText = document.getElementById("gameOver");
+        const restartBtn = document.getElementById("restartBtn");
+        const startScreen = document.getElementById("startScreen");
+        const startBtn = document.getElementById("startBtn");
+        const bgMusic = document.getElementById("bgMusic");
+        const gameOverVideo = document.getElementById("gameOverVideo");
+
+        /* ================= START SCREEN MUSIC (6th SONG) ================= */
+
+        const startMusic = new Audio("startsong.mp3");
+        startMusic.loop = true;
+        startMusic.play().catch(() => { });
+
+        /* ================= IN-GAME MUSIC SYSTEM (5 SONGS) ================= */
+
+        const songs = [
+            "song1.mp3",
+            "song2.mp3",
+            "song3.mp3",
+            "song4.mp3",
+            "song5.mp3"
+        ];
+
+        let currentSongIndex = 0;
+
+        function playCurrentSong() {
+            bgMusic.src = songs[currentSongIndex];
+            bgMusic.play().catch(() => { });
+        }
+
+        bgMusic.addEventListener("ended", () => {
+            currentSongIndex++;
+            if (currentSongIndex >= songs.length)
+                currentSongIndex = 0;
+            playCurrentSong();
+        });
+
+        /* ================= CANVAS ================= */
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener("resize", resizeCanvas);
+
+        /* ================= IMAGES ================= */
+
+        const playerImage = new Image();
+        playerImage.src = "player.png";
+
+        const enemyImage = new Image();
+        enemyImage.src = "enemy.png";
+
+        const roadImage = new Image();
+        roadImage.src = "road.png";
+
+        /* ================= GAME STATE ================= */
+
+        let gameRunning = false;
+        let score = 0;
+        let roadY = 0;
+
+        let roadLeft;
+        let roadRight;
+
+        function updateRoadBounds() {
+            roadLeft = canvas.width * 0.15;
+            roadRight = canvas.width * 0.85;
+        }
+        updateRoadBounds();
+        window.addEventListener("resize", updateRoadBounds);
+
+        const player = {
+            width: 50,
+            height: 90,
+            x: canvas.width / 2 - 25,
+            y: canvas.height - 130,
+            speed: 9
+        };
+
+        let enemies = [];
+        let spawnTimer = 0;
+        let keys = {};
+
+        /* ================= CONTROLS ================= */
+
+        document.addEventListener("keydown", e => keys[e.key] = true);
+        document.addEventListener("keyup", e => keys[e.key] = false);
+
+        document.body.addEventListener("touchmove", e => {
+            e.preventDefault();
+        }, { passive: false });
+
+        canvas.addEventListener("touchmove", e => {
+            if (!gameRunning) return;
+
+            const touchX = e.touches[0].clientX;
+            player.x = touchX - player.width / 2;
+
+            if (player.x < roadLeft)
+                player.x = roadLeft;
+
+            if (player.x > roadRight - player.width)
+                player.x = roadRight - player.width;
+        });
+
+        /* ================= START GAME ================= */
+
+        startBtn.addEventListener("click", () => {
+
+            // Stop start screen music
+            startMusic.pause();
+            startMusic.currentTime = 0;
+
+            startScreen.style.display = "none";
+            gameRunning = true;
+            ui.style.display = "block";
+            playCurrentSong();
+        });
+
+        /* ================= COLLISION ================= */
+
+        function isColliding(a, b) {
+            let pad = 10;
+            return (
+                a.x + pad < b.x + b.width - pad &&
+                a.x + a.width - pad > b.x + pad &&
+                a.y + pad < b.y + b.height - pad &&
+                a.y + a.height - pad > b.y + pad
+            );
+        }
+
+        function triggerGameOver() {
+            gameRunning = false;
+
+            gameOverVideo.style.display = "block";
+            gameOverVideo.currentTime = 0;
+            gameOverVideo.play();
+
+            gameOverText.style.display = "block";
+            restartBtn.style.display = "block";
+        }
+
+        /* ================= RESTART ================= */
+
+        function restartGame() {
+            score = 0;
+            enemies = [];
+            ui.innerText = "Score: 0";
+
+            gameOverText.style.display = "none";
+            restartBtn.style.display = "none";
+
+            gameOverVideo.pause();
+            gameOverVideo.style.display = "none";
+
+            gameRunning = true;
+        }
+
+        /* ================= ENEMIES ================= */
+
+        function spawnEnemy() {
+            const speedMultiplier = 1 + score * 0.05;
+            const laneWidth = roadRight - roadLeft - 60;
+            const randomX = roadLeft + Math.random() * laneWidth;
+
+            enemies.push({
+                x: randomX,
+                y: -120,
+                width: 50,
+                height: 90,
+                speed: 4 * speedMultiplier
+            });
+        }
+
+        /* ================= UPDATE ================= */
+
+        function update() {
+            if (!gameRunning) return;
+
+            const speedMultiplier = 1 + score * 0.03;
+
+            roadY += 5 * speedMultiplier;
+            if (roadY >= canvas.height)
+                roadY = 0;
+
+            const spawnRate = Math.max(20, 80 - score * 2);
+            spawnTimer++;
+
+            if (spawnTimer > spawnRate) {
+                spawnEnemy();
+                if (score > 15 && Math.random() < 0.5) spawnEnemy();
+                if (score > 30 && Math.random() < 0.7) spawnEnemy();
+                spawnTimer = 0;
+            }
+
+            if (keys["ArrowLeft"] && player.x > roadLeft)
+                player.x -= player.speed;
+
+            if (keys["ArrowRight"] && player.x < roadRight - player.width)
+                player.x += player.speed;
+
+            enemies.forEach((enemy, index) => {
+                enemy.y += enemy.speed;
+
+                if (isColliding(player, enemy))
+                    triggerGameOver();
+
+                if (enemy.y > canvas.height) {
+                    enemies.splice(index, 1);
+                    score++;
+                    ui.innerText = "Score: " + score;
+                }
+            });
+        }
+
+        /* ================= DRAW ================= */
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!gameRunning) return;
+
+            if (roadImage.complete) {
+                ctx.drawImage(roadImage, 0, roadY - canvas.height, canvas.width, canvas.height);
+                ctx.drawImage(roadImage, 0, roadY, canvas.width, canvas.height);
+            }
+
+            if (playerImage.complete)
+                ctx.drawImage(playerImage, player.x, player.y, player.width, player.height);
+
+            enemies.forEach(enemy => {
+                if (enemyImage.complete)
+                    ctx.drawImage(enemyImage, enemy.x, enemy.y, enemy.width, enemy.height);
+            });
+        }
+
+        /* ================= GAME LOOP ================= */
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+
+</body>
+
+</html>
